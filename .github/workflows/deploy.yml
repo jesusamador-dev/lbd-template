@@ -1,0 +1,101 @@
+name: Deploy FastAPI Lambda
+
+# Disparadores: cuando se hace push a la rama main
+on:
+  push:
+    branches:
+      - main
+
+# Definir los trabajos del flujo
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del código fuente
+      - name: Check out the repository
+        uses: actions/checkout@v3
+
+      # 2. Configurar Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # 3. Instalar dependencias y generar archivos .so
+      - name: Install dependencies
+        run: |
+         docker run --rm -v $(pwd):/app -w /app --user $(id -u):$(id -g) public.ecr.aws/sam/build-python3.11 bash -c "
+          pip install --platform manylinux2014_x86_64 \
+                      --target dependencies \
+                      --implementation cp \
+                      --python-version 3.11 \
+                      --only-binary=:all: \
+                      --no-cache-dir \
+                      --upgrade -r requirements.txt
+          "
+
+      # 4. Validar generación de archivos .so
+      - name: Validate .so files
+        run: ls -l dependencies/pydantic_core
+
+      # 5. Empaquetar la aplicación Lambda
+      - name: Prepare package directory
+        run: |
+          chmod -R 755 dependencies/
+          mkdir -p package/
+          rsync -av dependencies/ package/dependencies
+          cp main.py package/
+          cp -r src/ package/src
+          cd package
+          zip -r ../deployment-package.zip .
+
+      # 6. Configurar AWS CLI
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 7. Configurar Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      # 8. Inicializar Terraform
+       # 5. Inicializar Terraform
+      - name: Terraform Init
+        run: |
+          terraform -chdir=infra-aws init
+
+      - name: Terraform Plan
+        run: |
+          ls -la
+          terraform -chdir=infra-aws plan \
+          -var="COGNITO_USER_POOL_ID=${{ secrets.COGNITO_USER_POOL_ID }}" \
+          -var="COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}" \
+          -var="COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}" \
+          -var="DB_USER=${{ secrets.DB_USER }}" \
+          -var="DB_PASSWORD=${{ secrets.DB_PASSWORD }}" \
+          -var="DB_HOST=${{ secrets.DB_HOST }}" \
+          -var="DB_PORT=${{ secrets.DB_PORT }}" \
+          -var="DB_NAME=${{ secrets.DB_NAME }}"
+
+      - name: Terraform Apply
+        run: |
+          terraform -chdir=infra-aws apply -auto-approve \
+          -var="COGNITO_USER_POOL_ID=${{ secrets.COGNITO_USER_POOL_ID }}" \
+          -var="COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}" \
+          -var="COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}" \
+          -var="DB_USER=${{ secrets.DB_USER }}" \
+          -var="DB_PASSWORD=${{ secrets.DB_PASSWORD }}" \
+          -var="DB_HOST=${{ secrets.DB_HOST }}" \
+          -var="DB_PORT=${{ secrets.DB_PORT }}" \
+          -var="DB_NAME=${{ secrets.DB_NAME }}"
+
+
+      # 11. Limpiar archivos temporales
+      - name: Clean up temporary files
+        run: rm -rf package/ dependencies/ deployment-package.zip
