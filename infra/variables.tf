@@ -10,6 +10,10 @@ variable "COGNITO_DOMAIN" {
   description = "Dominio de Cognito"
 }
 
+variable "PYTHONPATH" {
+  description = "Ruta de las dependencias de python"
+}
+
 variable "DB_USER" {
   description = "Usuario de la base de datos"
 }
@@ -30,20 +34,14 @@ variable "DB_NAME" {
   description = "Nombre de la base de datos"
 }
 
-variable "lambda_already_exists" {
-  description = "Indica si la función Lambda ya existe en AWS"
-  type        = bool
-  default     = false
-}
-
 variable "lambda_function_name" {
   type    = string
-  default = "lambda-test"
+  default = "lbd-auth-mocksy"
 }
 
 variable "lambda_role" {
   type    = string
-  default = "kuosel-lambda-execution-role"
+  default = "MocksyLambdaRole"
 }
 
 variable "aws_region" {

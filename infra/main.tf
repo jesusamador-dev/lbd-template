@@ -1,10 +1,19 @@
+terraform {
+  required_providers {
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.2"
+    }
+  }
+}
+
 provider "aws" {
-  region = vars.aws_region
+  region = var.aws_region
 }
 
 # Bucket S3 para almacenar el ZIP de la Lambda
 resource "aws_s3_bucket" "lambda_bucket" {
-  bucket = "kuosel-lambda-bucket-${random_id.bucket_id.hex}"
+  bucket = "lbd-auth-mocksy-bucket-${random_id.bucket_id.hex}"
 }
 
 resource "random_id" "bucket_id" {
@@ -17,16 +26,20 @@ resource "aws_s3_object" "lambda_zip" {
   source = "../deployment-package.zip" # Ruta local del ZIP
 }
 
-# Data source para buscar el rol existente
-data "aws_iam_role" "existing_role" {
-  name = vars.lambda_role
+# Validar si el IAM Role existe antes de usarlo
+data "external" "iam_role_check" {
+  program = ["bash", "./bash/check_iam_role.sh"]
+
+  query = {
+    role_name = var.lambda_role
+  }
 }
 
 # Crear el rol si no existe
 resource "aws_iam_role" "lambda_execution_role" {
-  count = can(data.aws_iam_role.existing_role.name) ? 0 : 1
+  count = data.external.iam_role_check.result.exists == "true" ? 0 : 1
 
-  name = vars.lambda_role
+  name = var.lambda_role
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -44,30 +57,41 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Adjuntar política AWSLambdaBasicExecutionRole
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = coalesce(try(data.aws_iam_role.existing_role.name, null), try(aws_iam_role.lambda_execution_role[0].name, null))
+  role       = length(aws_iam_role.lambda_execution_role) > 0 ? aws_iam_role.lambda_execution_role[0].name : var.lambda_role
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+  depends_on = [aws_iam_role.lambda_execution_role]
 }
 
 # Adjuntar política AmazonCognitoPowerUser
 resource "aws_iam_role_policy_attachment" "cognito_power_user" {
-  role       = coalesce(try(data.aws_iam_role.existing_role.name, null), try(aws_iam_role.lambda_execution_role[0].name, null))
+  role       = length(aws_iam_role.lambda_execution_role) > 0 ? aws_iam_role.lambda_execution_role[0].name : var.lambda_role
   policy_arn = "arn:aws:iam::aws:policy/AmazonCognitoPowerUser"
+
+  depends_on = [aws_iam_role.lambda_execution_role]
 }
 
 resource "aws_iam_role_policy_attachment" "s3_power_user" {
-  role       = coalesce(try(data.aws_iam_role.existing_role.name, null), try(aws_iam_role.lambda_execution_role[0].name, null))
+  role       = length(aws_iam_role.lambda_execution_role) > 0 ? aws_iam_role.lambda_execution_role[0].name : var.lambda_role
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+
+  depends_on = [aws_iam_role.lambda_execution_role]
 }
 
-# Data source para buscar la Lambda existente
-data "aws_lambda_function" "existing_lambda" {
-  function_name = vars.lambda_function_name
+
+# Validar si la Lambda existe antes de usarla
+data "external" "existing_lambda" {
+  program = ["bash", "./bash/check_lambda.sh"]
+
+  query = {
+    lambda_name = var.lambda_function_name
+  }
 }
 
 # Unificar creación y actualización de Lambda
-resource "aws_lambda_function" "kuosel_lambda" {
-  count         = length(try(data.aws_lambda_function.existing_lambda.id, [])) > 0 ? 0 : 1
-  function_name = vars.lambda_function_name
+resource "aws_lambda_function" "mocksy_lambda" {
+  count         = data.external.existing_lambda.result.exists == "true" ? 0 : 1
+  function_name = var.lambda_function_name
   handler       = "main.handler"
   runtime       = "python3.11"
   s3_bucket     = aws_s3_bucket.lambda_bucket.id
@@ -75,10 +99,7 @@ resource "aws_lambda_function" "kuosel_lambda" {
 
   source_code_hash = filebase64sha256("../deployment-package.zip")
 
-  role = coalesce(
-    try(data.aws_iam_role.existing_role.arn, null),
-    length(aws_iam_role.lambda_execution_role) > 0 ? aws_iam_role.lambda_execution_role[0].arn : null
-  )
+  role =   length(aws_iam_role.lambda_execution_role) > 0 ? aws_iam_role.lambda_execution_role[0].arn : data.external.iam_role_check.result.arn
 
   memory_size = 128
   timeout     = 30
@@ -93,21 +114,21 @@ resource "aws_lambda_function" "kuosel_lambda" {
       DB_HOST              = var.DB_HOST
       DB_PORT              = var.DB_PORT
       DB_NAME              = var.DB_NAME
-      PYTHONPATH           = "/var/task/dependencies:/var/task"
+      PYTHONPATH           = var.PYTHONPATH
     }
   }
 }
 
 # Actualizar el código de la Lambda si ya existe
 resource "null_resource" "lambda_update_trigger" {
-  count = length(try(data.aws_lambda_function.existing_lambda.arn, [])) > 0 ? 1 : 0
+  count = data.external.existing_lambda.result.exists == "true" ? 1 : 0
 
   provisioner "local-exec" {
     command = <<EOT
       aws lambda update-function-code \
-        --function-name ${data.aws_lambda_function.existing_lambda.function_name} \
-        --s3-bucket ${aws_s3_bucket.lambda_bucket.id} \
-        --s3-key ${aws_s3_object.lambda_zip.key}
+        --function-name "${var.lambda_function_name}" \
+        --s3-bucket "${aws_s3_bucket.lambda_bucket.id}" \
+        --s3-key "${aws_s3_object.lambda_zip.key}"
     EOT
   }
 }

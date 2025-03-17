@@ -1,3 +1,14 @@
 node_modules
 .venv
 .env
+.env.*
+__pycache__/
+node_modules/
+venv/
+.terraform/
+.terraform.lock.hcl
+*.zip
+*.tfstate
+.idea
+.idea/aws.xml
+.idea/lambda-template.iml
