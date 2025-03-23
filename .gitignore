@@ -1,6 +1,6 @@
 node_modules
 .venv
-.env
+.env.dev
 .env.*
 __pycache__/
 node_modules/
@@ -12,3 +12,5 @@ venv/
 .idea
 .idea/aws.xml
 .idea/lambda-template.iml
+.package
+.package-lock

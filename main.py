@@ -1,21 +1,10 @@
-from typing import Dict
-
+from mangum import Mangum
 from fastapi import FastAPI
-from src.infrastructure.repositories.postgresql.database_postgress import DatabasePostgres
+from src.presentation.middlewares.setup_exception_handlers import setup_exception_handlers
+from src.presentation.middlewares.standardize_response_middleware import standardize_response
 
 app = FastAPI()
+setup_exception_handlers(app)
+app.middleware("http")(standardize_response)
 
-
-@app.get("/")
-async def root() -> Dict[str, str]:  # Agregamos el tipo de retorno
-    return {"message": "Hello World"}
-
-
-@app.get("/hello/{name}")
-async def say_hello(name: str) -> Dict[str, str]:  # Agregamos el tipo de retorno
-    return {"message": f"Hello {name}"}
-
-
-@app.on_event("shutdown")
-def shutdown():
-    DatabasePostgres.get_instance().close()
+handler = Mangum(app)
