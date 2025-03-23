@@ -13,7 +13,7 @@ provider "aws" {
 
 # Bucket S3 para almacenar el ZIP de la Lambda
 resource "aws_s3_bucket" "lambda_bucket" {
-  bucket = "lbd-auth-mocksy-bucket-${random_id.bucket_id.hex}"
+  bucket = "lbd-projects-mocksy-bucket-${random_id.bucket_id.hex}"
 }
 
 resource "random_id" "bucket_id" {

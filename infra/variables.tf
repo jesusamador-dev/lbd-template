@@ -36,7 +36,7 @@ variable "DB_NAME" {
 
 variable "lambda_function_name" {
   type    = string
-  default = "lbd-auth-mocksy"
+  default = "lbd-projects-mocksy"
 }
 
 variable "lambda_role" {
